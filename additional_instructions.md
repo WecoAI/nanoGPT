@@ -1,6 +1,6 @@
 # Optimizing Kernels
 
-This document outlines the strategy to improve speedup by writing fused and optimized CUDA/Triton/PyTorch kernels using a single-file implementation.
+This document outlines the strategy to improve speedup by writing fused and optimized in-line CUDA/Triton/PyTorch kernels using a single-file implementation.
 
 ## Goal 
 
@@ -40,83 +40,6 @@ Here's a summary of tips for writing efficient Triton kernels:
 
 ## GPU Architecture
 You are optimizibng code on an NVIDIA A100 40GB.
-
-## Simple Example (CUDA)
-
-### Baseline Code
-
-The baseline implementation of the `AddModel` class simply performs an element-wise addition.
-
-```python
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-class AddModel(nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-
-    def forward(self, a, b):
-        return a + b
-```
-
-### Optimized Code
-
-The optimized version employs a custom CUDA kernel for fused element-wise addition. The kernel is defined and compiled inline using PyTorch's `load_inline`.
-
-```python
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.cpp_extension import load_inline
-
-# Define the custom CUDA kernel for element-wise addition
-elementwise_add_source = '''
-#include <torch/extension.h>
-#include <cuda_runtime.h>
-
-// CUDA kernel for element-wise addition
-__global__ void elementwise_add_kernel(const float* a, const float* b, float* out, int size) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < size) {
-        out[idx] = a[idx] + b[idx];
-    }
-}
-
-// Launch function for the CUDA kernel
-torch::Tensor elementwise_add_cuda(torch::Tensor a, torch::Tensor b) {
-    auto size = a.numel();
-    auto out = torch::zeros_like(a);
-    const int block_size = 256;
-    const int num_blocks = (size + block_size - 1) / block_size;
-    elementwise_add_kernel<<<num_blocks, block_size>>>(a.data_ptr<float>(), b.data_ptr<float>(), out.data_ptr<float>(), size);
-    return out;
-}
-'''
-
-# C++ function prototype declaration
-elementwise_add_cpp_source = "torch::Tensor elementwise_add_cuda(torch::Tensor a, torch::Tensor b);"
-
-# Compile the inline CUDA code for element-wise addition
-elementwise_add = load_inline(
-    name="elementwise_add",
-    cpp_sources=elementwise_add_cpp_source,
-    cuda_sources=elementwise_add_source,
-    functions=["elementwise_add_cuda"],
-    verbose=True,
-    extra_cflags=[""],
-    extra_ldflags=[""],
-)
-
-class AddModel(nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-        self.elementwise_add = elementwise_add
-
-    def forward(self, a, b):
-        return self.elementwise_add.elementwise_add_cuda(a, b)
-```
-
 
 ## Simple Example (Triton)
 
@@ -281,7 +204,78 @@ class Model(nn.Module):
         return output
 ```
 
-The code provided above is only an example. DO NOT use this as the exact solution.
+## Simple Example (CUDA)
 
+### Baseline Code
 
-Write optimized in-line CUDA + Triton + PyTorch code to maximize inference performance.
+The baseline implementation of the `AddModel` class simply performs an element-wise addition.
+
+```python
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class AddModel(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(self, a, b):
+        return a + b
+```
+
+### Optimized Code
+
+The optimized version employs a custom CUDA kernel for fused element-wise addition. The kernel is defined and compiled inline using PyTorch's `load_inline`.
+
+```python
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.cpp_extension import load_inline
+
+# Define the custom CUDA kernel for element-wise addition
+elementwise_add_source = '''
+#include <torch/extension.h>
+#include <cuda_runtime.h>
+
+// CUDA kernel for element-wise addition
+__global__ void elementwise_add_kernel(const float* a, const float* b, float* out, int size) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < size) {
+        out[idx] = a[idx] + b[idx];
+    }
+}
+
+// Launch function for the CUDA kernel
+torch::Tensor elementwise_add_cuda(torch::Tensor a, torch::Tensor b) {
+    auto size = a.numel();
+    auto out = torch::zeros_like(a);
+    const int block_size = 256;
+    const int num_blocks = (size + block_size - 1) / block_size;
+    elementwise_add_kernel<<<num_blocks, block_size>>>(a.data_ptr<float>(), b.data_ptr<float>(), out.data_ptr<float>(), size);
+    return out;
+}
+'''
+
+# C++ function prototype declaration
+elementwise_add_cpp_source = "torch::Tensor elementwise_add_cuda(torch::Tensor a, torch::Tensor b);"
+
+# Compile the inline CUDA code for element-wise addition
+elementwise_add = load_inline(
+    name="elementwise_add",
+    cpp_sources=elementwise_add_cpp_source,
+    cuda_sources=elementwise_add_source,
+    functions=["elementwise_add_cuda"],
+    verbose=True,
+    extra_cflags=[""],
+    extra_ldflags=[""],
+)
+
+class AddModel(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.elementwise_add = elementwise_add
+
+    def forward(self, a, b):
+        return self.elementwise_add.elementwise_add_cuda(a, b)
+```
