@@ -21,6 +21,7 @@ Optimize the inference performance of the `GPTModel` class but fusing and rewrit
 - **No Fallback Implementation:** Do not include any alternative or fallback code.
 - **No Need For Logs:** Do not worry about writing logs.
 - **Don't Check For Packages:** Assume you have access to all the required packages.
+- **Identify and Re-Write Repeated Operations:** `nn.Linear`, `nn.LayerNorm`, `nn.GeLU`, `view`, `transpose` are some operations/classes/methods/functions that are used quite frequently in the code. See if you can write efficient in-line CUDA or triton code/optimizations for these such that they can be made much more efficient. Similarly do this for other commonly used operations you think would improve inference performance.
 
 ## Triton Kernel Tips
 Here's a summary of tips for writing efficient Triton kernels:

@@ -2,99 +2,114 @@ import os
 import shutil
 import torch
 import tiktoken
+import argparse
 from triton.testing import do_bench
-from baseline_model import GPT as BaselineGPT
-from optimized_model import GPT as OptimizedGPT
 
-# -----------------------------------------------------------------------------
-model_name = "gpt2"
-max_new_tokens = 100 # number of tokens generated in each sample
-temperature = 1.0 # 1.0 = no change, < 1.0 = less random, > 1.0 = more random, in predictions
-top_k = 1 # retain only the top_k most likely tokens, clamp others to have 0 probability
-seed = 1337
-device = 'cuda' # examples: 'cuda', 'cuda:0', 'cuda:1', etc.
-dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32' or 'bfloat16' or 'float16'
-atol = 1e-3
-warmup_s = 10
-rep_s = 50
-# -----------------------------------------------------------------------------
-correctness_prompts = [
-    "Hi",
-    "Hello, how are you?",
-    "What is the capital of France? I thought it was Nice. I think that wrong.",
-    "There once was a man from Nantucket. He went to the store to buy some peanuts. He bought a pound of peanuts.",
-    "Explain the concept of quantum entanglement, but explain it in a way that is easy to understand...as if you were explaining it to a 5 year old.",
-]
-timing_prompt = "What is the meaning of life, the universe, and everything?"
-# -----------------------------------------------------------------------------
-os.environ["TORCH_CUDA_ARCH_LIST"] = "8.0"
+def parse_args():
+    parser = argparse.ArgumentParser(description="Evaluate GPT model correctness and performance.")
+    parser.add_argument('--model_name', type=str, default="gpt2", help='Model name')
+    parser.add_argument('--max_new_tokens', type=int, default=100, help='Number of tokens to generate')
+    parser.add_argument('--temperature', type=float, default=1.0, help='Sampling temperature')
+    parser.add_argument('--top_k', type=int, default=1, help='Top-k sampling')
+    parser.add_argument('--seed', type=int, default=1337, help='Random seed')
+    parser.add_argument('--device', type=str, default='cuda', help='Device to use')
+    parser.add_argument('--dtype', type=str, default=None, help='Data type: float32, bfloat16, or float16')
+    parser.add_argument('--atol', type=float, default=1e-3, help='Absolute tolerance for correctness')
+    parser.add_argument('--warmup_s', type=int, default=10, help='Warmup seconds for benchmarking')
+    parser.add_argument('--rep_s', type=int, default=50, help='Repetition seconds for benchmarking')
+    return parser.parse_args()
 
-# reset torch extensions cache
-shutil.rmtree(os.path.expanduser("~/.cache/torch_extensions"), ignore_errors=True)
+def setup_environment(seed, device, dtype):
+    os.environ["TORCH_CUDA_ARCH_LIST"] = "8.0"
+    shutil.rmtree(os.path.expanduser("~/.cache/torch_extensions"), ignore_errors=True)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    device_type = 'cuda'
+    if dtype is None:
+        dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16'
+    ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
+    ctx = torch.amp.autocast(device_type=device_type, dtype=ptdtype)
+    return ctx, ptdtype
 
-torch.manual_seed(seed)
-torch.cuda.manual_seed(seed)
-torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
-torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
-device_type = 'cuda'
-ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
-ctx = torch.amp.autocast(device_type=device_type, dtype=ptdtype)
+def get_models(model_name, device):
+    from baseline_model import GPT as BaselineGPT
+    from optimized_model import GPT as OptimizedGPT
+    baseline_model = BaselineGPT.from_pretrained(model_name, dict(dropout=0.0))
+    baseline_model.eval()
+    baseline_model.to(device)
+    optimized_model = OptimizedGPT.from_pretrained(model_name, dict(dropout=0.0))
+    optimized_model.eval()
+    optimized_model.to(device)
+    return baseline_model, optimized_model
 
-# models
-baseline_model = BaselineGPT.from_pretrained(model_name, dict(dropout=0.0))
-baseline_model.eval()
-baseline_model.to(device)
+def get_tokenizer():
+    enc = tiktoken.get_encoding("gpt2")
+    encode = lambda s: enc.encode(s, allowed_special={"<|endoftext|>"})  # noqa
+    decode = lambda l: enc.decode(l)  # noqa
+    return encode, decode
 
-optimized_model = OptimizedGPT.from_pretrained(model_name, dict(dropout=0.0))
-optimized_model.eval()
-optimized_model.to(device)
+def prepare_inputs(encode, device, correctness_prompts, timing_prompt):
+    correctness_start_ids = [torch.tensor(encode(p), dtype=torch.long, device=device)[None, ...] for p in correctness_prompts]
+    timing_start_ids = torch.tensor(encode(timing_prompt), dtype=torch.long, device=device)[None, ...]
+    return correctness_start_ids, timing_start_ids
 
-enc = tiktoken.get_encoding("gpt2")
-encode = lambda s: enc.encode(s, allowed_special={"<|endoftext|>"})  # noqa
-decode = lambda l: enc.decode(l)  # noqa
+def check_correctness(baseline_model, optimized_model, correctness_start_ids, atol):
+    print("Checking logits, tokens and character generation correctness...")
+    for i, x in enumerate(correctness_start_ids):
+        baseline_logits = baseline_model(x)[0][0]
+        optimized_logits = optimized_model(x)[0][0]
+        logits_diff = torch.abs(baseline_logits - optimized_logits)
+        print(f"Test {i + 1}: Max float diff: {torch.max(logits_diff)}, Mean float diff: {torch.mean(logits_diff)}")
+        if torch.max(logits_diff) > atol:
+            print(f"[Error] Test {i + 1}: Logits are not close enough. atol: {atol}")
 
-# encode the beginning of the prompt
-correctness_start_ids = [(torch.tensor(encode(p), dtype=torch.long, device=device)[None, ...]) for p in correctness_prompts]
-timing_start_ids = (torch.tensor(encode(timing_prompt), dtype=torch.long, device=device)[None, ...])
+def measure_performance(baseline_model, optimized_model, timing_start_ids, max_new_tokens, temperature, top_k, warmup_s, rep_s):
+    print("Measuring performance...")
+    baseline_prefill_time = do_bench(lambda: baseline_model(timing_start_ids), warmup=warmup_s * 1e3, rep=rep_s * 1e3)
+    print(f"Prefill time: {baseline_prefill_time} seconds (baseline)")
+    optimized_prefill_time = do_bench(lambda: optimized_model(timing_start_ids), warmup=warmup_s * 1e3, rep=rep_s * 1e3)
+    print(f"Prefill time: {optimized_prefill_time} seconds (optimized)")
+    prefill_speedup = baseline_prefill_time / optimized_prefill_time
+    print(f"Prefill speedup: {prefill_speedup}")
 
-with torch.no_grad():
-    with ctx:
-        print("Checking logits, tokens and character generation correctness...")
-        for i, x in enumerate(correctness_start_ids):
-            # check logits correctness
-            baseline_logits = baseline_model(x)[0][0]  # logits for batch size of 1
-            optimized_logits = optimized_model(x)[0][0]  # logits for batch size of 1
-            logits_diff = torch.abs(baseline_logits - optimized_logits)
-            print(f"Test {i + 1}: Max float diff: {torch.max(logits_diff)}, Mean float diff: {torch.mean(logits_diff)}")
-            if torch.max(logits_diff) > atol:
-                print(f"[Error] Test {i + 1}: Logits are not close enough. atol: {atol}")
+    baseline_end_to_end_time = do_bench(
+        lambda: baseline_model.generate(timing_start_ids, max_new_tokens, temperature=temperature, top_k=top_k),
+        warmup=warmup_s * 1e3, rep=rep_s * 1e3)
+    print(f"Overall system generation time: {baseline_end_to_end_time} seconds (baseline)")
+    optimized_end_to_end_time = do_bench(
+        lambda: optimized_model.generate(timing_start_ids, max_new_tokens, temperature=temperature, top_k=top_k),
+        warmup=warmup_s * 1e3, rep=rep_s * 1e3)
+    print(f"Overall system generation time: {optimized_end_to_end_time} seconds (optimized)")
+    end_to_end_speedup = baseline_end_to_end_time / optimized_end_to_end_time
+    print(f"system_speedup: {end_to_end_speedup}")
 
-            # # run generation and check correctness
-            # baseline_y = baseline_model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k)[0]  # batch size of 1
-            # optimized_y = optimized_model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k)[0]  # batch size of 1
-            # if (baseline_y != optimized_y).any():
-            #     print(f"[Warning] Test {i}: Generation is not the same. At least one token is different.")
+def main():
+    args = parse_args()
+    correctness_prompts = [
+        "Hi",
+        "Hello, how are you?",
+        "What is the capital of France? I thought it was Nice. I think that wrong.",
+        "There once was a man from Nantucket. He went to the store to buy some peanuts. He bought a pound of peanuts.",
+        "Explain the concept of quantum entanglement, but explain it in a way that is easy to understand...as if you were explaining it to a 5 year old.",
+    ]
+    timing_prompt = "What is the meaning of life, the universe, and everything?"
 
-            # # check generation correctness
-            # baseline_generation = decode(baseline_y.tolist())
-            # optimized_generation = decode(optimized_y.tolist())
-            # if baseline_generation != optimized_generation:
-            #     print(f"[Warning] Test {i}: Generation is not the same. Baseline: {baseline_generation}, Optimized: {optimized_generation}")
-            
-        print("Measuring performance...")
-        # measure prefill time
-        baseline_prefill_time = do_bench(lambda: baseline_model(timing_start_ids), warmup=warmup_s * 1e3, rep=rep_s * 1e3)
-        print(f"Prefill time: {baseline_prefill_time} seconds (baseline)")
-        optimized_prefill_time = do_bench(lambda: optimized_model(timing_start_ids), warmup=warmup_s * 1e3, rep=rep_s * 1e3)
-        print(f"Prefill time: {optimized_prefill_time} seconds (optimized)")
-        prefill_speedup = baseline_prefill_time / optimized_prefill_time
-        print(f"Prefill speedup: {prefill_speedup}")
+    ctx, _ = setup_environment(args.seed, args.device, args.dtype)
+    # get_models should be called after setup_environment
+    baseline_model, optimized_model = get_models(args.model_name, args.device)
+    encode, decode = get_tokenizer()
+    correctness_start_ids, timing_start_ids = prepare_inputs(encode, args.device, correctness_prompts, timing_prompt)
 
+    with torch.no_grad():
+        with ctx:
+            check_correctness(baseline_model, optimized_model, correctness_start_ids, args.atol)
+            measure_performance(
+                baseline_model, optimized_model, timing_start_ids,
+                args.max_new_tokens, args.temperature, args.top_k,
+                args.warmup_s, args.rep_s
+            )
 
-        # measure end to end generation time
-        baseline_end_to_end_time = do_bench(lambda: baseline_model.generate(timing_start_ids, max_new_tokens, temperature=temperature, top_k=top_k), warmup=warmup_s * 1e3, rep=rep_s * 1e3)
-        print(f"Overall system generation time: {baseline_end_to_end_time} seconds (baseline)")
-        optimized_end_to_end_time = do_bench(lambda: optimized_model.generate(timing_start_ids, max_new_tokens, temperature=temperature, top_k=top_k), warmup=warmup_s * 1e3, rep=rep_s * 1e3)
-        print(f"Overall system generation time: {optimized_end_to_end_time} seconds (optimized)")
-        end_to_end_speedup = baseline_end_to_end_time / optimized_end_to_end_time
-        print(f"system_speedup: {end_to_end_speedup}")
+if __name__ == "__main__":
+    main()
