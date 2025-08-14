@@ -11,7 +11,7 @@ import inspect
 from dataclasses import dataclass
 import torch
 import torch.nn as nn
-from optimized_inference import GPTModel
+from baseline_inference import GPTModel
 
 @dataclass
 class GPTConfig:
@@ -26,26 +26,6 @@ class GPTConfig:
 class GPT(GPTModel):
     def __init__(self, config):
         super().__init__(config)
-
-    def get_num_params(self, non_embedding=True):
-        """
-        Return the number of parameters in the model.
-        For non-embedding count (default), the position embeddings get subtracted.
-        The token embeddings would too, except due to the parameter sharing these
-        params are actually used as weights in the final layer, so we include them.
-        """
-        n_params = sum(p.numel() for p in self.parameters())
-        if non_embedding:
-            n_params -= self.transformer.wpe.weight.numel()
-        return n_params
-
-    def _init_weights(self, module):
-        if isinstance(module, nn.Linear):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
-            if module.bias is not None:
-                torch.nn.init.zeros_(module.bias)
-        elif isinstance(module, nn.Embedding):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
     def crop_block_size(self, block_size):
         # model surgery to decrease the block size if necessary

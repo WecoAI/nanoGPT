@@ -12,6 +12,7 @@ Optimize the inference performance of the `GPTModel` class but fusing and rewrit
 - **Single-File Implementation:** Develop fused CUDA kernels within ONE file.
 - **Code Generated Format:** The solution must include a class `GPTModel` (an instance of `nn.Module`), with the same interface for the `forward` and `generate` methods. There is no need to write code about instantiating `GPTMode`, functions to get the inputs and any other usage based stuff because the `GPTModel` class is imported and used in my custom script to evaluate the performance of your implementation through the `forward` and `generate` methods. Only focus on writing the `GPTModel` class.
 - **Preserve Initialization:** Do not change the initialization of the `GPTModel` class.
+- **Optimize for Single Request Inference:** The batch size will always be fixed at 1 as during inference, there will be only 1 request processed at a time. That being said, the batch dimension should still remain in the computations.
 
 ## Potential Ideas (Non-Exhaustive)
 - **Multiple Kernels Allowed:** You can define more than one kernel in the file if needed.
