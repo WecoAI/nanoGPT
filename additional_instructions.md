@@ -1,30 +1,31 @@
 # Optimizing Kernels
 
-This document outlines the strategy to improve speedup by writing fused and optimized CUDA kernels using a single-file implementation.
+This document outlines the strategy to improve speedup by writing fused and optimized CUDA/Triton/PyTorch kernels using a single-file implementation.
 
 ## Goal 
 
-Optimize the inference performance of the `GPTModel` class but fusing and rewriting operations and combinations of operations/methods/functions using PyTorch, Triton and in-line CUDA.
+Optimize the inference performance of the `GPTModel` class by fusing and rewriting operations and combinations of operations/methods/functions using PyTorch, in-line CUDA and Triton along with any other optimizations you can think of. The goal is to maximize the end to end system speedup compared to the baseline for a single request inference task.
 
 ## Requirements
 
 - **Simplicity & Readability:** Write simple, easy-to-understand code and include clear comments.
-- **Single-File Implementation:** Develop fused CUDA kernels within ONE file.
+- **Single-File Implementation:** Develop fused CUDA/Triton kernels within ONE file.
 - **Code Generated Format:** The solution must include a class `GPTModel` (an instance of `nn.Module`), with the same interface for the `forward` and `generate` methods. There is no need to write code about instantiating `GPTMode`, functions to get the inputs and any other usage based stuff because the `GPTModel` class is imported and used in my custom script to evaluate the performance of your implementation through the `forward` and `generate` methods. Only focus on writing the `GPTModel` class.
 - **Preserve Initialization:** Do not change the initialization of the `GPTModel` class.
 - **Optimize for Single Request Inference:** The batch size will always be fixed at 1 as during inference, there will be only 1 request processed at a time. That being said, the batch dimension should still remain in the computations.
 
 ## Potential Ideas (Non-Exhaustive)
 - **Multiple Kernels Allowed:** You can define more than one kernel in the file if needed.
-- **One Large Single Kernel:** You can even try to stuff all of the operations into a single class in `GPTModel` and even fuse operations into a single cuda/triton kernel.
+- **One Large Single Kernel:** You can even try to merge all of the operations into a single class in `GPTModel` and fuse operations into a single CUDA/triton kernel.
 - **Optimize For Single Forward and Generation Pass:** Do not try to cache values in the initialization to be used across different forward passes. You may optimize the computation in the initialization to make the forward pass more efficient as long as you are optimizing for each individual forward pass.
 - **Avoid Templates:** Use plain fused kernel functions without CPP templates. DO NOT USE PyBind. 
 - **No Fallback Implementation:** Do not include any alternative or fallback code.
 - **No Need For Logs:** Do not worry about writing logs.
 - **Don't Check For Packages:** Assume you have access to all the required packages.
-- **Identify and Re-Write Repeated Operations:** `nn.Linear`, `nn.LayerNorm`, `nn.GeLU`, `view`, `transpose` are some operations/classes/methods/functions that are used quite frequently in the code. See if you can write efficient in-line CUDA or triton code/optimizations for these such that they can be made much more efficient. Similarly do this for other commonly used operations you think would improve inference performance.
+- **Identify and Re-Write Repeated Operations:** `nn.Linear`, `nn.LayerNorm`, `nn.GeLU`, `view`, `transpose` are some operations/classes/methods/functions that are used quite frequently in the code. See if you can write efficient in-line CUDA or triton code/optimizations for these such that they can be made much more efficient. Similarly do this for other commonly used operations you think would improve inference performance. The operations I've mentioned can be greatly sped up by fusing operations together using in-line CUDA.
+- **Try Different Frameworks:** When writing a triton kernel, also try the same using in-line CUDA to maximize your chances of finding the framework that works best.
+- **Use System-Level Optimizations:** When writing in-line CUDA, use compiler flags that can make the compiled kernel faster. When writing Triton, use things like autotune to improve performance. Take advantage of built-in settings in PyTorch such as `jit`, `torch.compile`, and other things to improve overall performance.
 
-## Triton Kernel Tips
 Here's a summary of tips for writing efficient Triton kernels:
 1.  **Understand the programming model:**
     *   Each kernel launch creates a grid of independent program instances, each processing a tile of data.
@@ -280,4 +281,7 @@ class Model(nn.Module):
         return output
 ```
 
-The code above is only an example. DO NOT use this as the exact solution.
+The code provided above is only an example. DO NOT use this as the exact solution.
+
+
+Write optimized in-line CUDA + Triton + PyTorch code to maximize inference performance.

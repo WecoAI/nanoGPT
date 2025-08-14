@@ -8,7 +8,7 @@ from triton.testing import do_bench
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate GPT model correctness and performance.")
     parser.add_argument('--model_name', type=str, default="gpt2", help='Model name')
-    parser.add_argument('--max_new_tokens', type=int, default=100, help='Number of tokens to generate')
+    parser.add_argument('--max_new_tokens', type=int, default=50, help='Number of tokens to generate')
     parser.add_argument('--temperature', type=float, default=1.0, help='Sampling temperature')
     parser.add_argument('--top_k', type=int, default=1, help='Top-k sampling')
     parser.add_argument('--seed', type=int, default=1337, help='Random seed')
@@ -16,7 +16,7 @@ def parse_args():
     parser.add_argument('--dtype', type=str, default=None, help='Data type: float32, bfloat16, or float16')
     parser.add_argument('--atol', type=float, default=1e-3, help='Absolute tolerance for correctness')
     parser.add_argument('--warmup_s', type=int, default=10, help='Warmup seconds for benchmarking')
-    parser.add_argument('--rep_s', type=int, default=50, help='Repetition seconds for benchmarking')
+    parser.add_argument('--rep_s', type=int, default=30, help='Repetition seconds for benchmarking')
     return parser.parse_args()
 
 def setup_environment(seed, device, dtype):
@@ -26,11 +26,10 @@ def setup_environment(seed, device, dtype):
     torch.cuda.manual_seed(seed)
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
-    device_type = 'cuda'
     if dtype is None:
         dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16'
     ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
-    ctx = torch.amp.autocast(device_type=device_type, dtype=ptdtype)
+    ctx = torch.amp.autocast(device_type=device, dtype=ptdtype)
     return ctx, ptdtype
 
 def get_models(model_name, device):
