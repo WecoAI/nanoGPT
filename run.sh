@@ -1,10 +1,11 @@
 # load environment variables
 set -a && source .env && set +a
 
+# run the optimization
 weco run --source optimized_inference.py \
      --eval-command "python evaluate.py" \
-     --metric system_speedup \
-     --goal maximize \
-     --steps 5 \
+     --metric system_generation_time \
+     --goal minimize \
+     --steps 100 \
      --model gpt-5 \
-     --additional-instructions additional_instructions.md
+     --additional-instructions cuda_guide.md
