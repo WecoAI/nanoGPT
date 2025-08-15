@@ -7,16 +7,16 @@ from triton.testing import do_bench
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate GPT model correctness and performance.")
-    parser.add_argument('--model_name', type=str, default="gpt2", help='Model name')
-    parser.add_argument('--max_new_tokens', type=int, default=50, help='Number of tokens to generate')
+    parser.add_argument('--model_name', type=str, default="gpt2-xl", help='Model name')
+    parser.add_argument('--max_new_tokens', type=int, default=100, help='Number of tokens to generate')
     parser.add_argument('--temperature', type=float, default=1.0, help='Sampling temperature')
     parser.add_argument('--top_k', type=int, default=1, help='Top-k sampling')
     parser.add_argument('--seed', type=int, default=1337, help='Random seed')
     parser.add_argument('--device', type=str, default='cuda', help='Device to use')
-    parser.add_argument('--dtype', type=str, default=None, help='Data type: float32, bfloat16, or float16')
+    parser.add_argument('--dtype', type=str, default='float32', help='Data type: float32, bfloat16, or float16')
     parser.add_argument('--atol', type=float, default=1e-3, help='Absolute tolerance for correctness')
     parser.add_argument('--warmup_s', type=int, default=10, help='Warmup seconds for benchmarking')
-    parser.add_argument('--rep_s', type=int, default=30, help='Repetition seconds for benchmarking')
+    parser.add_argument('--rep_s', type=int, default=50, help='Repetition seconds for benchmarking')
     return parser.parse_args()
 
 def setup_environment(seed, device, dtype):
@@ -66,30 +66,30 @@ def check_correctness(baseline_model, optimized_model, correctness_start_ids, at
 
 def measure_performance(baseline_model, optimized_model, timing_start_ids, max_new_tokens, temperature, top_k, warmup_s, rep_s):
     print("Measuring performance...")
-    baseline_prefill_time = do_bench(lambda: baseline_model(timing_start_ids), warmup=warmup_s * 1e3, rep=rep_s * 1e3)
-    print(f"Prefill time: {baseline_prefill_time} seconds (baseline)")
+    # baseline_prefill_time = do_bench(lambda: baseline_model(timing_start_ids), warmup=warmup_s * 1e3, rep=rep_s * 1e3)
+    # print(f"Prefill time: {baseline_prefill_time} seconds (baseline)")
     optimized_prefill_time = do_bench(lambda: optimized_model(timing_start_ids), warmup=warmup_s * 1e3, rep=rep_s * 1e3)
-    print(f"Prefill time: {optimized_prefill_time} seconds (optimized)")
-    prefill_speedup = baseline_prefill_time / optimized_prefill_time
-    print(f"Prefill speedup: {prefill_speedup}")
+    print(f"prefill_time: {optimized_prefill_time} seconds (optimized)")
+    # prefill_speedup = baseline_prefill_time / optimized_prefill_time
+    # print(f"Prefill speedup: {prefill_speedup}")
 
-    baseline_end_to_end_time = do_bench(
-        lambda: baseline_model.generate(timing_start_ids, max_new_tokens, temperature=temperature, top_k=top_k),
-        warmup=warmup_s * 1e3, rep=rep_s * 1e3)
-    print(f"Overall system generation time: {baseline_end_to_end_time} seconds (baseline)")
+    # baseline_end_to_end_time = do_bench(
+    #     lambda: baseline_model.generate(timing_start_ids, max_new_tokens, temperature=temperature, top_k=top_k),
+    #     warmup=warmup_s * 1e3, rep=rep_s * 1e3)
+    # print(f"Overall system generation time: {baseline_end_to_end_time} seconds (baseline)")
     optimized_end_to_end_time = do_bench(
         lambda: optimized_model.generate(timing_start_ids, max_new_tokens, temperature=temperature, top_k=top_k),
         warmup=warmup_s * 1e3, rep=rep_s * 1e3)
-    print(f"Overall system generation time: {optimized_end_to_end_time} seconds (optimized)")
-    end_to_end_speedup = baseline_end_to_end_time / optimized_end_to_end_time
-    print(f"system_speedup: {end_to_end_speedup}")
+    print(f"system_generation_time: {optimized_end_to_end_time} seconds (optimized)")
+    # end_to_end_speedup = baseline_end_to_end_time / optimized_end_to_end_time
+    # print(f"system_speedup: {end_to_end_speedup}")
 
 def main():
     args = parse_args()
     correctness_prompts = [
-        "Hi",
-        "Hello, how are you?",
-        "What is the capital of France? I thought it was Nice. I think that wrong.",
+        # "Hi",
+        # "Hello, how are you?",
+        # "What is the capital of France? I thought it was Nice. I think that wrong.",
         "There once was a man from Nantucket. He went to the store to buy some peanuts. He bought a pound of peanuts.",
         "Explain the concept of quantum entanglement, but explain it in a way that is easy to understand...as if you were explaining it to a 5 year old.",
     ]
