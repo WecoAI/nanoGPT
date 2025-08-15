@@ -4,7 +4,7 @@ This document outlines the strategy to improve speedup by writing fused and opti
 
 ## Goal 
 
-Optimize the inference performance of the `GPTModel` class by fusing and rewriting operations and combinations of operations/methods/functions using PyTorch, in-line CUDA and Triton along with any other optimizations you can think of. The goal is to maximize the end to end system speedup compared to the baseline for a single request inference task.
+Optimize the inference performance of the `GPTModel` class by fusing and rewriting operations and combinations of operations/methods/functions using PyTorch, in-line CUDA and Triton along with any other optimizations you can think of. The goal is to maximize the end to end system speedup compared to the baseline for a single request inference task. Maintain the same interface for `GPTModel`'s methods. Focus on writing efficient in-line CUDA kernel more than any other optimization
 
 ## Requirements
 
